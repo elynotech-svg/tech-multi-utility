@@ -19,6 +19,13 @@ export type DataWeaveSnippet = {
   code: string;
 };
 
+export type DataWeaveSuggestion = {
+  id: string;
+  label: string;
+  description: string;
+  insertText: string;
+};
+
 export const dataWeaveLessons: DataWeaveLesson[] = [
   {
     id: "json-map-filter-default",
@@ -385,4 +392,75 @@ export const dataWeaveOutputTypes = [
   "application/csv",
   "text/plain",
   "application/java",
+];
+
+export const dataWeaveSuggestions: DataWeaveSuggestion[] = [
+  {
+    id: "map-array",
+    label: "map array",
+    description: "Transform each array item.",
+    insertText: `map (item, index) -> {
+  id: item.id,
+  position: index + 1
+}`,
+  },
+  {
+    id: "filter-array",
+    label: "filter",
+    description: "Keep records that match a condition.",
+    insertText: `filter (item) -> item.active default false`,
+  },
+  {
+    id: "default-value",
+    label: "default",
+    description: "Provide a safe fallback.",
+    insertText: `payload.field default "fallback"`,
+  },
+  {
+    id: "object-output",
+    label: "object output",
+    description: "Create a JSON object from payload fields.",
+    insertText: `{
+  id: payload.id,
+  name: payload.name default "Unknown"
+}`,
+  },
+  {
+    id: "update-operator",
+    label: "update",
+    description: "Patch nested data without rebuilding everything.",
+    insertText: `payload update {
+  case item at .item -> item ++ {
+    updated: true
+  }
+}`,
+  },
+  {
+    id: "match-expression",
+    label: "match",
+    description: "Normalize values with pattern matching.",
+    insertText: `payload.status match {
+  case "NEW" -> "open"
+  case "DONE" -> "closed"
+  else -> "unknown"
+}`,
+  },
+  {
+    id: "group-by",
+    label: "groupBy + pluck",
+    description: "Summarize records by key.",
+    insertText: `(payload groupBy $.region) pluck ((items, region) -> {
+  region: region,
+  count: sizeOf(items)
+})`,
+  },
+  {
+    id: "try-expression",
+    label: "try",
+    description: "Handle coercion errors safely.",
+    insertText: `try(() -> payload.amount as Number) match {
+  case success if success.success -> success.result
+  else -> 0
+}`,
+  },
 ];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/Button";
 import { ResultBox } from "@/components/ResultBox";
 import { TextareaWithLabel } from "@/components/TextareaWithLabel";
@@ -8,7 +8,9 @@ import { ToolPageHeader } from "@/components/ToolPageHeader";
 import {
   dataWeaveLessons,
   dataWeaveOutputTypes,
+  dataWeaveSuggestions,
   dataWeaveSnippets,
+  type DataWeaveSuggestion,
   type DataWeaveSnippet,
 } from "@/lib/dataweave";
 
@@ -26,6 +28,10 @@ type ExecutionResponse = {
   stderr?: string;
   error?: string;
   exitCode?: number;
+};
+
+type ExecuteOptions = {
+  auto?: boolean;
 };
 
 const snippetCategories = [
@@ -48,6 +54,8 @@ const starterRows: MappingRow[] = [
   },
   { id: "3", field: "active", expression: "payload.active default false" },
 ];
+
+const AUTO_RUN_DELAY_MS = 900;
 
 function makeRow(): MappingRow {
   return {
@@ -146,6 +154,70 @@ function summarizePayload(payload: string) {
   }
 }
 
+function getPayloadSelectors(payload: string): DataWeaveSuggestion[] {
+  try {
+    const parsed = JSON.parse(payload);
+    const source = Array.isArray(parsed) ? parsed[0] : parsed;
+
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      return [];
+    }
+
+    return Object.keys(source)
+      .slice(0, 8)
+      .map((key) => ({
+        id: `payload-${key}`,
+        label: `payload.${key}`,
+        description: `Insert selector for the ${key} field.`,
+        insertText: `payload.${key}`,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function getContextSuggestions(
+  script: string,
+  payload: string
+): DataWeaveSuggestion[] {
+  const lowerScript = script.toLowerCase();
+  const suggestions = [...getPayloadSelectors(payload)];
+
+  if (!lowerScript.includes("map")) {
+    suggestions.push(
+      dataWeaveSuggestions.find((item) => item.id === "map-array")!
+    );
+  }
+
+  if (!lowerScript.includes("default")) {
+    suggestions.push(
+      dataWeaveSuggestions.find((item) => item.id === "default-value")!
+    );
+  }
+
+  if (!lowerScript.includes("update")) {
+    suggestions.push(
+      dataWeaveSuggestions.find((item) => item.id === "update-operator")!
+    );
+  }
+
+  suggestions.push(
+    ...dataWeaveSuggestions.filter((item) =>
+      ["filter-array", "object-output", "match-expression", "group-by"].includes(
+        item.id
+      )
+    )
+  );
+
+  return suggestions
+    .filter((suggestion): suggestion is DataWeaveSuggestion => Boolean(suggestion))
+    .filter(
+      (suggestion, index, all) =>
+        all.findIndex((item) => item.id === suggestion.id) === index
+    )
+    .slice(0, 10);
+}
+
 export default function DataWeaveToolPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("learn");
   const [lessonId, setLessonId] = useState(dataWeaveLessons[0].id);
@@ -161,6 +233,10 @@ export default function DataWeaveToolPage() {
   const [executionOutput, setExecutionOutput] = useState("");
   const [executionError, setExecutionError] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [autoRun, setAutoRun] = useState(true);
+  const [executionUnavailable, setExecutionUnavailable] = useState(false);
+  const [lastRunMode, setLastRunMode] = useState<"manual" | "auto" | null>(null);
+  const runSequenceRef = useRef(0);
 
   const selectedSnippet =
     dataWeaveSnippets.find((snippet) => snippet.id === selectedSnippetId) ??
@@ -189,6 +265,10 @@ export default function DataWeaveToolPage() {
 
   const scriptChecks = useMemo(() => getScriptChecks(script), [script]);
   const payloadSummary = useMemo(() => summarizePayload(payload), [payload]);
+  const contextSuggestions = useMemo(
+    () => getContextSuggestions(script, payload),
+    [payload, script]
+  );
 
   const selectLesson = (id: string) => {
     const nextLesson =
@@ -200,6 +280,7 @@ export default function DataWeaveToolPage() {
     setOutputType(nextLesson.outputMime);
     setExecutionOutput("");
     setExecutionError(false);
+    setExecutionUnavailable(false);
   };
 
   const updateRow = (id: string, field: keyof MappingRow, value: string) => {
@@ -212,10 +293,23 @@ export default function DataWeaveToolPage() {
     setRows((current) => current.filter((row) => row.id !== id));
   };
 
-  const executeScript = async () => {
+  const insertSuggestion = (insertText: string) => {
+    setScript((current) => {
+      const separator = current.endsWith("\n") || current.length === 0 ? "" : "\n";
+      return `${current}${separator}${insertText}`;
+    });
+  };
+
+  const executeScript = useCallback(async (options: ExecuteOptions = {}) => {
+    const runId = runSequenceRef.current + 1;
+    runSequenceRef.current = runId;
     setExecuting(true);
+    setLastRunMode(options.auto ? "auto" : "manual");
     setExecutionError(false);
-    setExecutionOutput("");
+    if (!options.auto) {
+      setExecutionOutput("");
+      setExecutionUnavailable(false);
+    }
 
     try {
       const response = await fetch("/api/dataweave/run", {
@@ -231,8 +325,14 @@ export default function DataWeaveToolPage() {
       });
       const data = (await response.json()) as ExecutionResponse;
 
+      if (runId !== runSequenceRef.current) return;
+
       if (!response.ok) {
         setExecutionError(true);
+        if (response.status === 503) {
+          setExecutionUnavailable(true);
+          setAutoRun(false);
+        }
         setExecutionOutput(
           [
             data.error ?? "DataWeave execution failed.",
@@ -250,6 +350,7 @@ export default function DataWeaveToolPage() {
         data.stderr ? `${data.output ?? ""}\n\nSTDERR:\n${data.stderr}` : data.output ?? ""
       );
     } catch (error) {
+      if (runId !== runSequenceRef.current) return;
       setExecutionError(true);
       setExecutionOutput(
         error instanceof Error
@@ -257,9 +358,22 @@ export default function DataWeaveToolPage() {
           : "Unable to call the DataWeave execution API."
       );
     } finally {
-      setExecuting(false);
+      if (runId === runSequenceRef.current) {
+        setExecuting(false);
+      }
     }
-  };
+  }, [lesson.inputMime, payload, script]);
+
+  useEffect(() => {
+    if (!autoRun || executionUnavailable || activeTab !== "learn") return;
+    if (!script.trim()) return;
+
+    const timeout = window.setTimeout(() => {
+      void executeScript({ auto: true });
+    }, AUTO_RUN_DELAY_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeTab, autoRun, executeScript, executionUnavailable, script]);
 
   return (
     <div>
@@ -355,8 +469,8 @@ export default function DataWeaveToolPage() {
                 onChange={(event) => setScript(event.target.value)}
                 className="min-h-[300px]"
               />
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={executeScript} loading={executing}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => executeScript()} loading={executing}>
                   Run script
                 </Button>
                 <Button onClick={() => setScript(formatDataWeave(script))}>
@@ -365,7 +479,65 @@ export default function DataWeaveToolPage() {
                 <Button variant="secondary" onClick={() => setScript(lesson.script)}>
                   Reset script
                 </Button>
+                <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={autoRun}
+                    disabled={executionUnavailable}
+                    onChange={(event) => setAutoRun(event.target.checked)}
+                    className="h-4 w-4 accent-blue-600"
+                  />
+                  Auto-run
+                </label>
               </div>
+              <p className="text-xs text-slate-500">
+                {executing
+                  ? `${lastRunMode === "auto" ? "Auto-running" : "Running"} script...`
+                  : autoRun
+                    ? "Auto-run executes about one second after you stop typing."
+                    : executionUnavailable
+                      ? "Auto-run paused because the DataWeave CLI is not available on this server."
+                      : "Auto-run is off. Use Run script to execute manually."}
+              </p>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">
+                  Auto suggestions
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Insert common DataWeave patterns or selectors detected from
+                  the sample payload.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                className="justify-start px-0 text-xs sm:justify-center sm:px-3"
+                onClick={() => setActiveTab("snippets")}
+              >
+                Browse all snippets
+              </Button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {contextSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  onClick={() => insertSuggestion(suggestion.insertText)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-accent hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+                  title={suggestion.description}
+                >
+                  <span className="block font-medium text-slate-900">
+                    {suggestion.label}
+                  </span>
+                  <span className="block text-xs text-slate-500">
+                    {suggestion.description}
+                  </span>
+                </button>
+              ))}
             </div>
           </section>
 

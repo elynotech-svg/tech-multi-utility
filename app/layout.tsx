@@ -1,14 +1,47 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import { siteConfig, siteKeywords } from "@/lib/seo";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Dev Utility Hub",
-  description:
-    "Developer utilities: Base64, JSON, PDF, images, UUIDs, and URL encoding.",
+  metadataBase: new URL(siteConfig.url),
+  applicationName: siteConfig.name,
+  title: {
+    default: `${siteConfig.name} | Free Online Developer Tools`,
+    template: `%s | ${siteConfig.name}`,
+  },
+  description: siteConfig.description,
+  keywords: siteKeywords,
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: `${siteConfig.name} | Free Online Developer Tools`,
+    description: siteConfig.description,
+    url: "/",
+    siteName: siteConfig.name,
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary",
+    title: `${siteConfig.name} | Free Online Developer Tools`,
+    description: siteConfig.description,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
 };
 
 export default function RootLayout({
@@ -22,14 +55,14 @@ export default function RootLayout({
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
             <Link
-              href="/dashboard"
+              href="/"
               className="text-lg font-semibold text-slate-900 hover:text-accent"
             >
-              Dev Utility Hub
+              {siteConfig.name}
             </Link>
             <nav className="text-sm text-slate-600">
               <Link href="/dashboard" className="hover:text-accent">
-                Dashboard
+                Tools
               </Link>
             </nav>
           </div>

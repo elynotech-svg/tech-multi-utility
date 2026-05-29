@@ -20,6 +20,14 @@ type MappingRow = {
   expression: string;
 };
 
+type ExecutionResponse = {
+  output?: string;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+  exitCode?: number;
+};
+
 const snippetCategories = [
   "All",
   "Core",
@@ -150,6 +158,9 @@ export default function DataWeaveToolPage() {
   const [snippetCategory, setSnippetCategory] =
     useState<(typeof snippetCategories)[number]>("All");
   const [selectedSnippetId, setSelectedSnippetId] = useState(dataWeaveSnippets[0].id);
+  const [executionOutput, setExecutionOutput] = useState("");
+  const [executionError, setExecutionError] = useState(false);
+  const [executing, setExecuting] = useState(false);
 
   const selectedSnippet =
     dataWeaveSnippets.find((snippet) => snippet.id === selectedSnippetId) ??
@@ -187,6 +198,8 @@ export default function DataWeaveToolPage() {
     setPayload(nextLesson.payload);
     setScript(nextLesson.script);
     setOutputType(nextLesson.outputMime);
+    setExecutionOutput("");
+    setExecutionError(false);
   };
 
   const updateRow = (id: string, field: keyof MappingRow, value: string) => {
@@ -199,6 +212,55 @@ export default function DataWeaveToolPage() {
     setRows((current) => current.filter((row) => row.id !== id));
   };
 
+  const executeScript = async () => {
+    setExecuting(true);
+    setExecutionError(false);
+    setExecutionOutput("");
+
+    try {
+      const response = await fetch("/api/dataweave/run", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          script,
+          payload,
+          inputMime: lesson.inputMime,
+        }),
+      });
+      const data = (await response.json()) as ExecutionResponse;
+
+      if (!response.ok) {
+        setExecutionError(true);
+        setExecutionOutput(
+          [
+            data.error ?? "DataWeave execution failed.",
+            data.stderr ? `\nSTDERR:\n${data.stderr}` : "",
+            data.stdout ? `\nSTDOUT:\n${data.stdout}` : "",
+            data.exitCode !== undefined ? `\nExit code: ${data.exitCode}` : "",
+          ]
+            .filter(Boolean)
+            .join("")
+        );
+        return;
+      }
+
+      setExecutionOutput(
+        data.stderr ? `${data.output ?? ""}\n\nSTDERR:\n${data.stderr}` : data.output ?? ""
+      );
+    } catch (error) {
+      setExecutionError(true);
+      setExecutionOutput(
+        error instanceof Error
+          ? error.message
+          : "Unable to call the DataWeave execution API."
+      );
+    } finally {
+      setExecuting(false);
+    }
+  };
+
   return (
     <div>
       <ToolPageHeader
@@ -207,10 +269,10 @@ export default function DataWeaveToolPage() {
       />
 
       <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-950">
-        This lab helps you learn and draft DataWeave transformations in the
-        browser. It does not execute scripts with a Mule runtime; use Anypoint
-        Studio, Mule runtime, or the official DataWeave playground to run final
-        transformations.
+        This lab can execute DataWeave through the official MuleSoft
+        <code className="mx-1 rounded bg-blue-100 px-1">dw</code>
+        CLI when it is installed on the server. If the CLI is unavailable, the
+        run button will explain how to enable it.
       </div>
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -294,6 +356,9 @@ export default function DataWeaveToolPage() {
                 className="min-h-[300px]"
               />
               <div className="flex flex-wrap gap-2">
+                <Button onClick={executeScript} loading={executing}>
+                  Run script
+                </Button>
                 <Button onClick={() => setScript(formatDataWeave(script))}>
                   Format spacing
                 </Button>
@@ -305,11 +370,19 @@ export default function DataWeaveToolPage() {
           </section>
 
           <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <ResultBox
-              label="Expected output for selected lesson"
-              value={lesson.expectedOutput}
-              emptyMessage="Select a lesson to see sample output."
-            />
+            <div className="space-y-6">
+              <ResultBox
+                label="Execution output"
+                value={executionOutput}
+                error={executionError}
+                emptyMessage="Run the script to see DataWeave CLI output."
+              />
+              <ResultBox
+                label="Expected output for selected lesson"
+                value={lesson.expectedOutput}
+                emptyMessage="Select a lesson to see sample output."
+              />
+            </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-900">
                 Script checklist

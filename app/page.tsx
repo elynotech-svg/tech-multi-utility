@@ -32,8 +32,8 @@ export default function Home() {
         </h1>
         <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-slate-600">
           {siteConfig.name} brings everyday developer tools together in one
-          browser-based workspace for JSON, XML, Base64, URLs, UUIDs, PDFs,
-          images, and CSV data.
+          browser-based workspace for DataWeave, JSON, XML, Base64, URLs,
+          UUIDs, PDFs, images, and CSV data.
         </p>
       </section>
 
@@ -80,7 +80,7 @@ export default function Home() {
           <h3 className="font-semibold text-slate-900">Common formats</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
             Work with JSON, XML, CSV, Base64, URL components, UUIDs, PDF files,
-            and JPG or PNG images.
+            JPG or PNG images, and MuleSoft DataWeave examples.
           </p>
         </div>
         <div>

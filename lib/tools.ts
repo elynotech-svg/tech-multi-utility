@@ -25,6 +25,20 @@ export const tools: ToolDefinition[] = [
     keywords: ["json formatter", "json validator", "pretty print json", "validate json"],
   },
   {
+    id: "dataweave",
+    title: "DataWeave Learn Lab",
+    description: "Learn MuleSoft DataWeave 2.x with examples, snippets, and script templates.",
+    icon: "DW",
+    href: "/tools/dataweave",
+    keywords: [
+      "dataweave",
+      "mulesoft dataweave",
+      "dataweave tutorial",
+      "dataweave examples",
+      "dataweave playground",
+    ],
+  },
+  {
     id: "pdf",
     title: "PDF → DOCX Converter",
     description: "Upload a PDF and download a converted DOCX file.",

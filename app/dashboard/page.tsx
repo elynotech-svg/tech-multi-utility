@@ -5,9 +5,9 @@ import { tools } from "@/lib/tools";
 export const metadata = buildPageMetadata({
   title: "All Developer Tools",
   description:
-    "Browse free online utilities for JSON, XML, Base64, URLs, UUIDs, PDFs, images, and CSV data.",
+    "Browse free online utilities for DataWeave, JSON, XML, Base64, URLs, UUIDs, PDFs, images, and CSV data.",
   path: "/dashboard",
-  keywords: ["free developer tools", "web utilities", "online dev tools"],
+  keywords: ["free developer tools", "web utilities", "online dev tools", "dataweave examples"],
 });
 
 export default function DashboardPage() {

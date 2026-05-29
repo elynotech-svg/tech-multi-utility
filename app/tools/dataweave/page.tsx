@@ -1,0 +1,564 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { Button } from "@/components/Button";
+import { ResultBox } from "@/components/ResultBox";
+import { TextareaWithLabel } from "@/components/TextareaWithLabel";
+import { ToolPageHeader } from "@/components/ToolPageHeader";
+import {
+  dataWeaveLessons,
+  dataWeaveOutputTypes,
+  dataWeaveSnippets,
+  type DataWeaveSnippet,
+} from "@/lib/dataweave";
+
+type ActiveTab = "learn" | "builder" | "snippets";
+
+type MappingRow = {
+  id: string;
+  field: string;
+  expression: string;
+};
+
+const snippetCategories = [
+  "All",
+  "Core",
+  "Arrays",
+  "Objects",
+  "Strings",
+  "Dates",
+  "XML",
+  "Runtime",
+] as const;
+
+const starterRows: MappingRow[] = [
+  { id: "1", field: "id", expression: "payload.id" },
+  {
+    id: "2",
+    field: "displayName",
+    expression: 'payload.firstName ++ " " ++ payload.lastName',
+  },
+  { id: "3", field: "active", expression: "payload.active default false" },
+];
+
+function makeRow(): MappingRow {
+  return {
+    id: crypto.randomUUID(),
+    field: "",
+    expression: "",
+  };
+}
+
+function formatDataWeave(script: string) {
+  return script
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function quoteObjectKey(key: string) {
+  return /^[A-Za-z_$][\w$]*$/.test(key) ? key : `"${key.replace(/"/g, '\\"')}"`;
+}
+
+function buildMappingScript(rows: MappingRow[], outputType: string) {
+  const mappings = rows
+    .filter((row) => row.field.trim() && row.expression.trim())
+    .map(
+      (row) =>
+        `  ${quoteObjectKey(row.field.trim())}: ${row.expression.trim()}`
+    );
+
+  const body =
+    mappings.length > 0
+      ? mappings.join(",\n")
+      : "  // Add output fields and DataWeave expressions below";
+
+  return `%dw 2.0
+output ${outputType}
+---
+{
+${body}
+}`;
+}
+
+function getScriptChecks(script: string) {
+  const checks = [
+    {
+      label: "DataWeave 2.x header",
+      ok: /^%dw\s+2\.0/m.test(script),
+      hint: "Add %dw 2.0 at the top of the script.",
+    },
+    {
+      label: "Output directive",
+      ok: /^output\s+[\w/+.-]+/m.test(script),
+      hint: "Declare the target media type, for example output application/json.",
+    },
+    {
+      label: "Body separator",
+      ok: script.includes("---"),
+      hint: "Separate directives from the body with ---.",
+    },
+    {
+      label: "Balanced braces",
+      ok:
+        (script.match(/{/g)?.length ?? 0) ===
+        (script.match(/}/g)?.length ?? 0),
+      hint: "Check that every opening brace has a closing brace.",
+    },
+  ];
+
+  return checks;
+}
+
+function summarizePayload(payload: string) {
+  try {
+    const parsed = JSON.parse(payload);
+
+    if (Array.isArray(parsed)) {
+      return `JSON array with ${parsed.length} item${parsed.length === 1 ? "" : "s"}.`;
+    }
+
+    if (parsed && typeof parsed === "object") {
+      return `JSON object with keys: ${Object.keys(parsed).join(", ") || "none"}.`;
+    }
+
+    return `JSON ${typeof parsed} value.`;
+  } catch {
+    if (payload.trim().startsWith("<")) {
+      return "XML-like payload. Use namespace declarations for qualified elements.";
+    }
+
+    if (payload.includes(",")) {
+      return "Delimited text or CSV-like payload. Declare input payload application/csv when needed.";
+    }
+
+    return "Plain text payload.";
+  }
+}
+
+export default function DataWeaveToolPage() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("learn");
+  const [lessonId, setLessonId] = useState(dataWeaveLessons[0].id);
+  const lesson = dataWeaveLessons.find((item) => item.id === lessonId) ?? dataWeaveLessons[0];
+  const [payload, setPayload] = useState(lesson.payload);
+  const [script, setScript] = useState(lesson.script);
+  const [outputType, setOutputType] = useState(lesson.outputMime);
+  const [rows, setRows] = useState<MappingRow[]>(starterRows);
+  const [snippetQuery, setSnippetQuery] = useState("");
+  const [snippetCategory, setSnippetCategory] =
+    useState<(typeof snippetCategories)[number]>("All");
+  const [selectedSnippetId, setSelectedSnippetId] = useState(dataWeaveSnippets[0].id);
+
+  const selectedSnippet =
+    dataWeaveSnippets.find((snippet) => snippet.id === selectedSnippetId) ??
+    dataWeaveSnippets[0];
+
+  const filteredSnippets = useMemo(() => {
+    const query = snippetQuery.trim().toLowerCase();
+
+    return dataWeaveSnippets.filter((snippet) => {
+      const matchesCategory =
+        snippetCategory === "All" || snippet.category === snippetCategory;
+      const matchesQuery =
+        !query ||
+        `${snippet.title} ${snippet.description} ${snippet.code}`
+          .toLowerCase()
+          .includes(query);
+
+      return matchesCategory && matchesQuery;
+    });
+  }, [snippetCategory, snippetQuery]);
+
+  const generatedScript = useMemo(
+    () => buildMappingScript(rows, outputType),
+    [outputType, rows]
+  );
+
+  const scriptChecks = useMemo(() => getScriptChecks(script), [script]);
+  const payloadSummary = useMemo(() => summarizePayload(payload), [payload]);
+
+  const selectLesson = (id: string) => {
+    const nextLesson =
+      dataWeaveLessons.find((item) => item.id === id) ?? dataWeaveLessons[0];
+
+    setLessonId(nextLesson.id);
+    setPayload(nextLesson.payload);
+    setScript(nextLesson.script);
+    setOutputType(nextLesson.outputMime);
+  };
+
+  const updateRow = (id: string, field: keyof MappingRow, value: string) => {
+    setRows((current) =>
+      current.map((row) => (row.id === id ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const removeRow = (id: string) => {
+    setRows((current) => current.filter((row) => row.id !== id));
+  };
+
+  return (
+    <div>
+      <ToolPageHeader
+        title="DataWeave Learn Lab"
+        description="Explore MuleSoft DataWeave 2.x examples, reusable snippets, and mapping script templates."
+      />
+
+      <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-950">
+        This lab helps you learn and draft DataWeave transformations in the
+        browser. It does not execute scripts with a Mule runtime; use Anypoint
+        Studio, Mule runtime, or the official DataWeave playground to run final
+        transformations.
+      </div>
+
+      <div className="mb-6 flex flex-wrap gap-2">
+        <Button
+          variant={activeTab === "learn" ? "primary" : "secondary"}
+          onClick={() => setActiveTab("learn")}
+        >
+          Learn examples
+        </Button>
+        <Button
+          variant={activeTab === "builder" ? "primary" : "secondary"}
+          onClick={() => setActiveTab("builder")}
+        >
+          Mapping builder
+        </Button>
+        <Button
+          variant={activeTab === "snippets" ? "primary" : "secondary"}
+          onClick={() => setActiveTab("snippets")}
+        >
+          Snippet library
+        </Button>
+      </div>
+
+      {activeTab === "learn" && (
+        <div className="space-y-6">
+          <section className="grid gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_220px]">
+            <div>
+              <label
+                htmlFor="dataweave-lesson"
+                className="text-sm font-medium text-slate-700"
+              >
+                Lesson
+              </label>
+              <select
+                id="dataweave-lesson"
+                value={lessonId}
+                onChange={(event) => selectLesson(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                {dataWeaveLessons.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {lesson.description}
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3 text-sm">
+              <p className="font-medium text-slate-900">{lesson.level}</p>
+              <p className="mt-1 text-slate-600">Input: {lesson.inputMime}</p>
+              <p className="text-slate-600">Output: {lesson.outputMime}</p>
+              <div className="mt-3 flex flex-wrap gap-1">
+                {lesson.concepts.map((concept) => (
+                  <span
+                    key={concept}
+                    className="rounded-full bg-white px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-200"
+                  >
+                    {concept}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-2">
+            <TextareaWithLabel
+              label="Sample payload"
+              hint={payloadSummary}
+              value={payload}
+              onChange={(event) => setPayload(event.target.value)}
+              className="min-h-[300px]"
+            />
+            <div className="space-y-3">
+              <TextareaWithLabel
+                label="DataWeave script"
+                hint="Edit the script or load another lesson."
+                value={script}
+                onChange={(event) => setScript(event.target.value)}
+                className="min-h-[300px]"
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => setScript(formatDataWeave(script))}>
+                  Format spacing
+                </Button>
+                <Button variant="secondary" onClick={() => setScript(lesson.script)}>
+                  Reset script
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <ResultBox
+              label="Expected output for selected lesson"
+              value={lesson.expectedOutput}
+              emptyMessage="Select a lesson to see sample output."
+            />
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-900">
+                Script checklist
+              </h2>
+              <ul className="mt-3 space-y-3">
+                {scriptChecks.map((check) => (
+                  <li key={check.label} className="text-sm">
+                    <div
+                      className={
+                        check.ok
+                          ? "font-medium text-green-700"
+                          : "font-medium text-amber-700"
+                      }
+                    >
+                      {check.ok ? "Pass" : "Check"}: {check.label}
+                    </div>
+                    {!check.ok && (
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {check.hint}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeTab === "builder" && (
+        <div className="space-y-6">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="grid gap-4 md:grid-cols-[1fr_220px]">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Mapping script generator
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Add target fields and DataWeave expressions to draft a common
+                  JSON object mapping. Expressions are inserted exactly as typed.
+                </p>
+              </div>
+              <div>
+                <label
+                  htmlFor="dataweave-output-type"
+                  className="text-sm font-medium text-slate-700"
+                >
+                  Output type
+                </label>
+                <select
+                  id="dataweave-output-type"
+                  value={outputType}
+                  onChange={(event) => setOutputType(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                >
+                  {dataWeaveOutputTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {rows.map((row, index) => (
+                <div
+                  key={row.id}
+                  className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[180px_minmax(0,1fr)_auto]"
+                >
+                  <div>
+                    <label
+                      htmlFor={`field-${row.id}`}
+                      className="text-xs font-medium text-slate-600"
+                    >
+                      Output field {index + 1}
+                    </label>
+                    <input
+                      id={`field-${row.id}`}
+                      value={row.field}
+                      onChange={(event) =>
+                        updateRow(row.id, "field", event.target.value)
+                      }
+                      placeholder="customerName"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor={`expression-${row.id}`}
+                      className="text-xs font-medium text-slate-600"
+                    >
+                      DataWeave expression
+                    </label>
+                    <input
+                      id={`expression-${row.id}`}
+                      value={row.expression}
+                      onChange={(event) =>
+                        updateRow(row.id, "expression", event.target.value)
+                      }
+                      placeholder='payload.firstName ++ " " ++ payload.lastName'
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      variant="ghost"
+                      className="w-full text-red-600 hover:text-red-700 md:w-auto"
+                      onClick={() => removeRow(row.id)}
+                      disabled={rows.length === 1}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button onClick={() => setRows((current) => [...current, makeRow()])}>
+                Add mapping
+              </Button>
+              <Button variant="secondary" onClick={() => setRows(starterRows)}>
+                Reset mappings
+              </Button>
+            </div>
+          </section>
+
+          <ResultBox
+            label="Generated DataWeave script"
+            value={generatedScript}
+            emptyMessage="Generated script will appear here."
+          />
+        </div>
+      )}
+
+      {activeTab === "snippets" && (
+        <div className="space-y-6">
+          <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[1fr_220px]">
+            <div>
+              <label
+                htmlFor="snippet-search"
+                className="text-sm font-medium text-slate-700"
+              >
+                Search snippets
+              </label>
+              <input
+                id="snippet-search"
+                value={snippetQuery}
+                onChange={(event) => setSnippetQuery(event.target.value)}
+                placeholder="Search map, update, date, XML..."
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="snippet-category"
+                className="text-sm font-medium text-slate-700"
+              >
+                Category
+              </label>
+              <select
+                id="snippet-category"
+                value={snippetCategory}
+                onChange={(event) =>
+                  setSnippetCategory(
+                    event.target.value as (typeof snippetCategories)[number]
+                  )
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                {snippetCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="space-y-3">
+              {filteredSnippets.length > 0 ? (
+                filteredSnippets.map((snippet) => (
+                  <SnippetCard
+                    key={snippet.id}
+                    snippet={snippet}
+                    selected={selectedSnippet.id === snippet.id}
+                    onSelect={() => setSelectedSnippetId(snippet.id)}
+                  />
+                ))
+              ) : (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  No snippets match your filters.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+                  {selectedSnippet.category}
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-900">
+                  {selectedSnippet.title}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {selectedSnippet.description}
+                </p>
+              </div>
+              <ResultBox
+                label="Snippet code"
+                value={selectedSnippet.code}
+                emptyMessage="Choose a snippet to view code."
+              />
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SnippetCard({
+  snippet,
+  selected,
+  onSelect,
+}: {
+  snippet: DataWeaveSnippet;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-xl border p-4 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 ${
+        selected
+          ? "border-accent bg-blue-50"
+          : "border-slate-200 bg-white hover:border-accent"
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+        {snippet.category}
+      </p>
+      <h3 className="mt-1 font-semibold text-slate-900">{snippet.title}</h3>
+      <p className="mt-1 text-sm leading-6 text-slate-600">
+        {snippet.description}
+      </p>
+    </button>
+  );
+}

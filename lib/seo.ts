@@ -5,13 +5,14 @@ export const siteConfig = {
   name: "Tech Multi Utility",
   url: "https://techmultiutility.vercel.app",
   description:
-    "Free online developer tools for formatting JSON and XML, encoding Base64 and URLs, converting CSV, generating UUIDs, and working with PDF and image files.",
+    "Free online developer tools for learning DataWeave, formatting JSON and XML, encoding Base64 and URLs, converting CSV, generating UUIDs, and working with PDF and image files.",
 };
 
 export const siteKeywords = [
   "developer tools",
   "online utilities",
   "JSON formatter",
+  "DataWeave tutorial",
   "Base64 encoder",
   "URL encoder",
   "UUID generator",
